@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 from collections import defaultdict
 import time
 from heapq import heappush, heappop
-from itertools import count
+import itertools as it
 #import sys
 
 import graph_tool.all as gt
@@ -47,46 +47,50 @@ class GraphGT(object):
     def shallow_copy(self):
         '''Something is wrong in this shallow copy.
         Gets errors when adding new edges even though add_missing=True'''
+        raise NotImplementedError
         H = GraphGT()
         H.G = gt.Graph(self.G)
         H.vd = self.vd
         H.edge_attr = self.edge_attr
         return H
 
-    def add_edge(self, n1, n2, **attr_dict_arg):#ci=None, pi=None
-        attrs = {'ci': None, 'pi': None}
-        #U.eprint('gt:', n1, n2)
+    def add_edge(self, n1, n2, attr_dict):#ci=None, pi=None
+        v1, v2 = self.__create_edge(n1, n2)
+        e = self.G.edge(v1, v2, add_missing=True)
+        self.edge_attr[e].update(attr_dict)
+        return
 
-        #v1 = self.vd[n1]
-        #v2 = self.vd[n2]
-
+    def __create_edge(self, n1, n2):
         try:
             v1 = self.vd[n1]
         except KeyError:
             v1 = self.G.add_vertex()
             self.vd[n1] = v1
+            self.v_attr[v1] = n1
         try:
             v2 = self.vd[n2]
         except KeyError:
             v2 = self.G.add_vertex()
             self.vd[n2] = v2
+            self.v_attr[v2] = n2
+        return v1, v2
 
-        #v2 = self.vd[n2]
+    def add_edges_from(self, edges, eprops=None):
+        gt_edges = (self.__create_edge(*e) for e in edges)
+        # Add missing is true for the API: add_edge_list
+        e = self.G.add_edge_list(gt_edges)
 
-        self.v_attr[v1] = n1
-        self.v_attr[v2] = n2
+        if eprops is not None:
+            for e, attr_dict in it.izip(edges, eprops):
+                gt_e = self.G.edge(e, add_missing=False)
+                self.edge_attr[gt_e].update(attr_dict)
+        return None
 
-        #print(v1, v2)
-        e = self.G.edge(v1, v2, add_missing=True)
-        #TODO: The attributes of an existing edge will be updated.
-        # Should this be the intended behavior?
-        #self.edge_attr[e] = {'ci': ci, 'pi': pi}
-        attrs.update(attr_dict_arg)
-        self.edge_attr[e] = attrs
+    def num_edges(self):
+        return self.G.num_edges()
 
-    def add_edges_from(self, iterable):
-        for e in iterable:
-            self.add_edge(*e)
+    def num_nodes(self):
+        return self.G.num_vertices()
 
     def get_path_attr_list(self, path, attrs):
         attr_map = defaultdict(list)
@@ -360,7 +364,7 @@ class GraphGT(object):
 
         lengths = [length[target]]
         paths = [path[target]]
-        c = count()
+        c = it.count()
         B = []
 
         # Is deep copy really required?

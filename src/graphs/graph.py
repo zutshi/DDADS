@@ -42,7 +42,7 @@ def class_factory(graph_lib):
         raise err.Fatal('unknown graph library requested: {}'.format(graph_lib))
 
 
-def factory(graph_lib):
+def factory(graph_lib, *args):
     """factory
 
     Parameters
@@ -53,7 +53,7 @@ def factory(graph_lib):
     -------
     corresponding object of the specified graph lib
     """
-    return class_factory(graph_lib)()
+    return class_factory(graph_lib)(*args)
 
 
 def random_graph(

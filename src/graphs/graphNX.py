@@ -11,7 +11,7 @@ import logging
 
 import networkx as nx
 from heapq import heappush, heappop
-from itertools import count
+import itertools as it
 from collections import defaultdict
 from blessed import Terminal
 
@@ -123,36 +123,25 @@ class GraphNX(object):
     # TODO: An edge b/w two states stores a unique value of ci and pi.
     # In other words, if x -> x', only the last discovered ci/pi is
     # stored.
-    def add_edge(self, v1, v2, **attr_dict_arg):#ci=None, pi=None, weight=1):
-        if self.G.has_edge(v1, v2):
-            return
-        #TODO: remove default attrs
-        attrs = {'ci': None, 'pi': None, 'weight': 1}
-        #print('nx:', v1, v2)
-        attrs.update(attr_dict_arg)
-
+    def add_edge(self, v1, v2, attr_dict_arg):#ci=None, pi=None, weight=1):
 #         if __debug__:
 #             if self.G.has_edge(v1, v2):
 #                 err.warn('overwriting an edge')
 
-        self.G.add_edge(v1, v2, attrs)
+        self.G.add_edge(v1, v2, attr_dict_arg)
+        return
 
-        self.ctr += 1
-
-        if self.ctr % 1000 == 0:
-            with term.location(x=100, y=term.height-10):
-                print(term.green('nodes={}, edges={}'
-                                 .format(
-                                    self.G.number_of_nodes(),
-                                    self.G.number_of_edges())))
-
-    def add_edges_from(self, edge_list, **attr_dict_arg):#ci=None, pi=None, weight=1):
-        attrs = {'ci': None, 'pi': None, 'weight': 1}
-        attrs.update(attr_dict_arg)
-        self.G.add_edges_from(edge_list, attrs)
+    def add_edges_from(self, edge_list, attr_list=None):
+        if attr_list is None:
+            self.G.add_edges_from(edge_list)
+        else:
+            for edge, attr in it.izip(edge_list, attr_list):
+                self.G.add_edge(edge, attr)
+        return
 
     def add_node(self, v, **attrs):
         self.G.add_node(v, attrs)
+        return
 
     def has_edge(self, u, v):
         return self.G.has_edge(u, v)
@@ -266,7 +255,7 @@ class GraphNX(object):
 
         lengths = [length[target]]
         paths = [path[target]]
-        c = count()
+        c = it.count()
         B = []
 
         # Is deep copy really required?
