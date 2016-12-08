@@ -80,7 +80,6 @@ def analyze_graph(params, G, traces):
     print('existing paths: {}'.format(len(all_abspaths)))
     print('simple paths in graph: {}'.format(ngraph_paths))
     print('Newly created simple paths: {}'.format(len(new_paths)))
-
     print()
 
     # TODO: Instead of counting simple paths, should be counting
@@ -96,6 +95,7 @@ def analyze_graph(params, G, traces):
     print('existing error paths: {}'.format(num_unique_absvios))
     print('simple error paths in abstract graph: {}'.format(num_graph_vios))
     print('Newly created error simple paths: {}'.format(len(new_absvios)))
+    print()
 
     # find the distance metric
 
@@ -114,6 +114,101 @@ def build_graph(params, traces):
                 for xi, xj in U.pairwise(trace.x_array))
     G.add_edges_from(edges)
     return G
+
+
+def secam():
+    import scamr
+    scamr.run_secam()
+
+
+def create_abstraction(sys, prop):
+    num_dims = sys.num_dims
+    plant_config_dict = sys.plant_config_dict
+    controller_path_dir_path = sys.controller_path_dir_path
+    controller_object_str = sys.controller_object_str
+
+    T = prop.T
+
+    METHOD = globalopts.opts.METHOD
+
+    plant_abstraction_type = 'cell'
+    if METHOD == 'concolic':
+        controller_abstraction_type = 'concolic'
+
+        # Initialize concolic engine
+
+        var_type = {}
+
+        # state_arr is not symbolic in concolic exec,
+        # with concrete controller states
+
+        var_type['state_arr'] = 'int_arr'
+        var_type['x_arr'] = 'int_arr'
+        var_type['input_arr'] = 'int_arr'
+        concolic_engine = CE.concolic_engine_factory(
+            var_type,
+            num_dims,
+            controller_object_str)
+
+        # sampler = sample.Concolic(concolic_engine)
+
+        sampler = sample.IntervalConcolic(concolic_engine)
+    elif METHOD == 'concrete':
+        sampler = sample.IntervalSampler()
+        controller_abstraction_type = 'concrete'
+        controller_sym_path_obj = None
+
+    elif METHOD == 'concrete_no_controller':
+        sampler = sample.IntervalSampler()
+        controller_abstraction_type = 'concrete_no_controller'
+        controller_sym_path_obj = None
+
+        # TODO: manual contruction of paths!!!!
+        # use OS independant APIs from fileOps
+    elif METHOD == 'symbolic':
+        sampler = None
+        if globalopts.opts.symbolic_analyzer == 'klee':
+            controller_abstraction_type = 'symbolic_klee'
+            if globalopts.opts.cntrl_rep == 'smt2':
+                controller_path_dir_path += '/klee/'
+            else:
+                raise err.Fatal('KLEE supports only smt2 files!')
+        elif globalopts.opts.symbolic_analyzer == 'pathcrawler':
+            controller_abstraction_type = 'symbolic_pathcrawler'
+            if globalopts.opts.cntrl_rep == 'smt2':
+                controller_path_dir_path += '/pathcrawler/'
+            elif globalopts.opts.cntrl_rep == 'trace':
+                controller_path_dir_path += '/controller'
+            else:
+                raise err.Fatal('argparse should have caught this!')
+
+            # TAG:PCH_IND
+            # Parse PC Trace
+            import CSymLoader as CSL
+            controller_sym_path_obj = CSL.load_sym_obj((globalopts.opts.cntrl_rep, globalopts.opts.trace_struct), controller_path_dir_path)
+        else:
+            raise err.Fatal('unknown symbolic analyzer requested:{}'.format(globalopts.opts.symbolic_analyzer))
+
+    else:
+        raise NotImplementedError
+
+    # TODO: parameters like controller_sym_path_obj are absraction dependant
+    # and should not be passed directly to abstraction_factory. Instead a
+    # flexible structure should be created which can be filled by the
+    # CAsymbolic abstraction module and supplied as a substructure. I guess the
+    # idea is that an abstraction module should be 'pluggable'.
+    current_abs = abstraction.abstraction_factory(
+        plant_config_dict,
+        prop.ROI,
+        T,
+        num_dims,
+        controller_sym_path_obj,
+        sys.min_smt_sample_dist,
+        plant_abstraction_type,
+        controller_abstraction_type,
+        globalopts.opts.graph_lib,
+        )
+    return current_abs, sampler
 
 
 def main():
