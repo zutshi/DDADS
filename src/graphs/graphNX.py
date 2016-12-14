@@ -22,8 +22,6 @@ import err
 #from networkx.drawing.nx_agraph import graphviz_layout
 from networkx.drawing.nx_agraph import write_dot
 
-import settings
-
 logger = logging.getLogger(__name__)
 
 GVIZ_GRAPH_PATH = '{}_graph.dot'
@@ -123,7 +121,7 @@ class GraphNX(object):
     # TODO: An edge b/w two states stores a unique value of ci and pi.
     # In other words, if x -> x', only the last discovered ci/pi is
     # stored.
-    def add_edge(self, v1, v2, attr_dict_arg):#ci=None, pi=None, weight=1):
+    def add_edge(self, v1, v2, attr_dict_arg=None):#ci=None, pi=None, weight=1):
 #         if __debug__:
 #             if self.G.has_edge(v1, v2):
 #                 err.warn('overwriting an edge')

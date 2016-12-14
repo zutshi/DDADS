@@ -30,6 +30,10 @@ Opts = collections.namedtuple('Opts',
                                'plotting',
                                'model_err',
                                'lp_engine',
+                               'max_paths',
+                               'refine',
+                               'bmc_engine',
+                               'construct_path',
                                'par',
                                )
                               )
@@ -114,6 +118,10 @@ def parse():
                 plotting = plotting.factory(args.plot, args.plots, *args.plot_opts),
                 model_err = args.incl_error,
                 lp_engine = args.lp_engine,
+                max_paths = 0,
+                refine = 'model-dft',
+                bmc_engine = 'pwa',
+                construct_path= lambda x:'./vault/'+x,
                 par = args.par)
 
     #sys, prop = loadsystem.parse(filepath, args.pvt_init_data)
@@ -121,3 +129,5 @@ def parse():
     #opts.construct_path = setup_dir(sys, args.output)
 
     return opts
+
+

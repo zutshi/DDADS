@@ -133,10 +133,11 @@ class Cell(object):
         abs_state : plant abstract state
         A : plant abstraction (for eps)
         """
-        self.cell = cell
-        self.eps = eps
         assert(isinstance(cell, tuple))
-        assert(isinstance(eps, np.ndarray))
+        assert(len(cell) == len(eps) != 0)
+        self.cell = cell
+        # why is eps an array?
+        self.eps = np.array(eps)
         return
 
 #     def split(self, axes=None):

@@ -34,6 +34,9 @@ from core import cellmanager as CM
 def abstract(params, cstate):
     return CM.cell_from_concrete(cstate, params.eps)
 
+# def abstract(params, cstate):
+#     return CM.Cell(CM.cell_from_concrete(cstate, params.eps), params.eps)
+
 
 def analyze_graph(params, G, traces):
     import constraints as Cons
@@ -51,8 +54,8 @@ def analyze_graph(params, G, traces):
 
     print(U.decorate('abstract stats'))
     print('Total number of nodes/edges: {}/{}, beta={}'.format(G.num_nodes(), G.num_edges(), G.num_edges()/G.num_nodes()))
-    C0 = {n for n in G.nodes_iter() if CM.ival_constraints(n, params) & X0}
-    Cf = {n for n in G.nodes_iter() if CM.ival_constraints(n, params) & Xf}
+    C0 = {n for n in G.nodes_iter() if CM.ival_constraints(n, params.eps) & X0}
+    Cf = {n for n in G.nodes_iter() if CM.ival_constraints(n, params.eps) & Xf}
     print('Number of abstract initial (C0) and final (Cf) states: {}, {}'.format(len(C0), len(Cf)))
     graph_vios = set(map(tuple, G.get_all_path_generator(C0, Cf)))
     num_graph_vios = len(graph_vios)
@@ -116,107 +119,20 @@ def build_graph(params, traces):
     return G
 
 
-def secam():
-    import scamr
-    scamr.run_secam()
-
-
-def create_abstraction(sys, prop):
-    num_dims = sys.num_dims
-    plant_config_dict = sys.plant_config_dict
-    controller_path_dir_path = sys.controller_path_dir_path
-    controller_object_str = sys.controller_object_str
-
-    T = prop.T
-
-    METHOD = globalopts.opts.METHOD
-
-    plant_abstraction_type = 'cell'
-    if METHOD == 'concolic':
-        controller_abstraction_type = 'concolic'
-
-        # Initialize concolic engine
-
-        var_type = {}
-
-        # state_arr is not symbolic in concolic exec,
-        # with concrete controller states
-
-        var_type['state_arr'] = 'int_arr'
-        var_type['x_arr'] = 'int_arr'
-        var_type['input_arr'] = 'int_arr'
-        concolic_engine = CE.concolic_engine_factory(
-            var_type,
-            num_dims,
-            controller_object_str)
-
-        # sampler = sample.Concolic(concolic_engine)
-
-        sampler = sample.IntervalConcolic(concolic_engine)
-    elif METHOD == 'concrete':
-        sampler = sample.IntervalSampler()
-        controller_abstraction_type = 'concrete'
-        controller_sym_path_obj = None
-
-    elif METHOD == 'concrete_no_controller':
-        sampler = sample.IntervalSampler()
-        controller_abstraction_type = 'concrete_no_controller'
-        controller_sym_path_obj = None
-
-        # TODO: manual contruction of paths!!!!
-        # use OS independant APIs from fileOps
-    elif METHOD == 'symbolic':
-        sampler = None
-        if globalopts.opts.symbolic_analyzer == 'klee':
-            controller_abstraction_type = 'symbolic_klee'
-            if globalopts.opts.cntrl_rep == 'smt2':
-                controller_path_dir_path += '/klee/'
-            else:
-                raise err.Fatal('KLEE supports only smt2 files!')
-        elif globalopts.opts.symbolic_analyzer == 'pathcrawler':
-            controller_abstraction_type = 'symbolic_pathcrawler'
-            if globalopts.opts.cntrl_rep == 'smt2':
-                controller_path_dir_path += '/pathcrawler/'
-            elif globalopts.opts.cntrl_rep == 'trace':
-                controller_path_dir_path += '/controller'
-            else:
-                raise err.Fatal('argparse should have caught this!')
-
-            # TAG:PCH_IND
-            # Parse PC Trace
-            import CSymLoader as CSL
-            controller_sym_path_obj = CSL.load_sym_obj((globalopts.opts.cntrl_rep, globalopts.opts.trace_struct), controller_path_dir_path)
-        else:
-            raise err.Fatal('unknown symbolic analyzer requested:{}'.format(globalopts.opts.symbolic_analyzer))
-
-    else:
-        raise NotImplementedError
-
-    # TODO: parameters like controller_sym_path_obj are absraction dependant
-    # and should not be passed directly to abstraction_factory. Instead a
-    # flexible structure should be created which can be filled by the
-    # CAsymbolic abstraction module and supplied as a substructure. I guess the
-    # idea is that an abstraction module should be 'pluggable'.
-    current_abs = abstraction.abstraction_factory(
-        plant_config_dict,
-        prop.ROI,
-        T,
-        num_dims,
-        controller_sym_path_obj,
-        sys.min_smt_sample_dist,
-        plant_abstraction_type,
-        controller_abstraction_type,
-        globalopts.opts.graph_lib,
-        )
-    return current_abs, sampler
-
-
 def main():
 
     globalopts.opts = cmdline.parse()
-    params = AbsParams(eps=1.0)
 
-    trace_gen = T.get_simdump_gen(globalopts.opts.sys_path)
+    import scamr
+    from core import loadsystem
+    import settings
+    from datastructs import hashmap
+
+    sys, prop = loadsystem.parse(globalopts.opts.sys_path, None)
+
+    params = AbsParams(eps=sys.plant_config_dict['eps'])
+
+    trace_gen = T.get_simdump_gen(sys.sys_name, sys.dirname)
     traces = list(trace_gen)
     G = build_graph(params, traces)
     analyze_graph(params, G, traces)
@@ -224,12 +140,20 @@ def main():
     print('num nodes: {}'.format(G.num_nodes()))
     print('num edges: {}'.format(G.num_edges()))
 
+    data_map = hashmap.Data(params, traces)
+    settings.data = data_map
+
+    settings.abs_graph[0] = G
+
+    globalopts.opts.sys_path
+    current_abs = scamr.create_abstraction(sys, prop)
+    scamr.falsify(sys, prop, current_abs)
 
 #######################################################################
 # GLobals: is there a better way to do this?
 
 TIME_STR = fops.time_string()
-logger = setup_output.setup_logger(TIME_STR)
+#logger = setup_output.setup_logger(TIME_STR)
 AbsParams = collections.namedtuple('AbsParams', ('eps'))
 term = blessed.Terminal()
 

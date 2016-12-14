@@ -304,7 +304,7 @@ def overapprox_x0(num_dims, prop, pwa_trace, solver=gopts.lp_engine):#solver='gl
                 ['x{}'.format(i) for i in range(nvars)]
                 ))
 
-    A_ub, b_ub = truncate(A_ub, b_ub)
+    #A_ub, b_ub = truncate(A_ub, b_ub)
 
     if solver == 'glpk':
         from linprog import pyglpklp

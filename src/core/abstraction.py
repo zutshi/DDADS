@@ -7,12 +7,18 @@ from __future__ import division
 from __future__ import unicode_literals
 
 
+# S: Controller States
 # X: Plant states
+# U: controller outputs
 
 # import time
 
 import logging
 import numpy as np
+
+# import matplotlib
+# matplotlib.use('GTK3Agg')
+# import matplotlib.pyplot as plt
 
 import utils as U
 from utils import print
@@ -21,12 +27,17 @@ import err
 from graphs import graph as g
 from . import state as st
 from . import cellmanager as CM
-from . import PACell as PA
 
-import settings
+import globalopts
 
 logger = logging.getLogger(__name__)
 
+class DummyControllerAbs(object):
+    pass
+
+# def abstraction_factory(des, plant_sim, T, sampler, init_cons, final_cons):
+#    return GridBasedAbstraction(des, plant_sim, T, sampler, init_cons, final_cons)
+    # return GridBasedAbstraction(*args, **kwargs)
 
 def abstraction_factory(*args, **kwargs):
     return TopLevelAbs(*args, **kwargs)
@@ -42,8 +53,8 @@ class TopLevelAbs:
     # get_abs_state = collections.namedtuple('tpl_abs_state', ['plant_state', 'controller_state'], verbose=False)
 
     @staticmethod
-    def get_abs_state(plant_state):
-        return AbstractState(plant_state)
+    def get_abs_state(plant_state, controller_state):
+        return AbstractState(plant_state, controller_state)
 
     # takes in the plant and the controller abstraction objects which are
     # instatiation of their respective parameterized abstract classes
@@ -55,29 +66,39 @@ class TopLevelAbs:
         ROI,
         T,
         num_dims,
+        controller_sym_path_obj,
+        min_smt_sample_dist,
         plant_abstraction_type,
-        graph_lib,
+        controller_abstraction_type,
+        graph_factory,
         plant_abs=None,
+        controller_abs=None,
         prog_bar=False,
         ):
 
         # super(Abstraction, self).__init__()
 
         self.ROI = ROI
-        self.graph_lib = graph_lib
+        self.graph_factory = graph_factory
         self.num_dims = num_dims
-        self.G = g.factory(graph_lib)
+        self.G = graph_factory()
         self.T = T
         self.N = None
         self.state = None
         self.scale = None
+        self.controller_sym_path_obj = controller_sym_path_obj
+        self.min_smt_sample_dist = min_smt_sample_dist
         self.plant_abstraction_type = plant_abstraction_type
+        self.controller_abstraction_type = controller_abstraction_type
 
         # The list of init_cons is interpreted as [ic0 \/ ic1 \/ ... \/ icn]
 #        self.init_cons_list = init_cons_list
 #        self.final_cons_list = final_cons_list
 
         self.eps = None
+
+#        self.refinement_factor = 0.5
+
         self.delta_t = None
         self.num_samples = None
 
@@ -87,13 +108,62 @@ class TopLevelAbs:
 
         self.parse_config(config_dict)
 
+        # TAG:Z3_IND - default init
+        smt_solver = None
+
+        # TAG:Z3_IND - shuffled the plant abstraction creation after controller
+        # abstraction. This lets us get the smt_solver depending upon the
+        # requeseted controller abstraction
+
+        if controller_abstraction_type == 'symbolic_pathcrawler':
+            from . import smtSolver as smt
+            smt_solver = smt.smt_solver_factory('z3')
+            from . import CASymbolicPCrawler as CA
+            controller_abs = CA.ControllerSymbolicAbstraction(self.num_dims,
+                    controller_sym_path_obj, min_smt_sample_dist, smt_solver)
+        elif controller_abstraction_type == 'symbolic_klee':
+            from . import CASymbolicKLEE as CA
+            controller_abs = CA.ControllerSymbolicAbstraction(self.num_dims,
+                    controller_sym_path_obj, min_smt_sample_dist)
+        #elif controller_abstraction_type == 'concolic':
+        #    import CAConcolic as CA
+        #    controller_abs = CA.ControllerCollectionAbstraction(self.num_dims)
+        elif controller_abstraction_type == 'concrete':
+            from . import CAConcolic as CA
+            controller_abs = CA.ControllerCollectionAbstraction(self.num_dims)
+        elif controller_abstraction_type == 'concrete_no_controller':
+            #DummyControllerAbs = type(str('DummyControllerAbs'), (), {})
+            controller_abs = DummyControllerAbs()
+            controller_abs.is_symbolic = False
+
+            # can not use None because of a check in
+            # get_abs_state_from_concrete_state() which silently makes
+            # the entire abstract state None if a None is encountered
+            # in either plant or contorller abs state.
+            def dummy(*args): return 0
+
+            controller_abs.get_abs_state_from_concrete_state = dummy
+            controller_abs.get_reachable_abs_states = sample_abs_state
+            controller_abs.get_concrete_states_from_abs_state = dummy
+        else:
+            print(controller_abstraction_type)
+            raise NotImplementedError
+
+        if plant_abstraction_type == 'cell':
+            #from PACell import *
+            from . import PACell as PA
+        else:
+            raise NotImplementedError
+        # Overriding the passed in plant and conctroller abstractions
         plant_abs = PA.PlantAbstraction(
             self.T,
             self.N,
             self.num_dims,
             self.delta_t,
             self.eps,
+            self.refinement_factor,
             self.num_samples,
+            smt_solver, #TAG:Z3_IND - Add solver param
             )
 
         print(U.decorate('new abstraction created'))
@@ -108,6 +178,7 @@ class TopLevelAbs:
         logger.debug('new abstraction created')
         logger.debug('eps:{}'.format(self.eps))
         logger.debug('num_samples:{}'.format(self.num_samples))
+        logger.debug('refine:{}'.format(self.refinement_factor))
         logger.debug('deltaT:{}'.format(self.delta_t))
         logger.debug('TH:{}'.format(self.T))
         logger.debug('num traces:{}'.format(self.N))
@@ -116,12 +187,25 @@ class TopLevelAbs:
         # ##!!##logger.debug('==========abstraction parameters==========')
         # ##!!##logger.debug('eps: {}, refinement_factor: {}, num_samples: {},delta_t: {}'.format(str(self.eps), self.refinement_factor, self.num_samples, self.delta_t))
 
+        initial_state_list = []
+
+        # WHy was this needed in the first place?
+#        for node in self.initial_state_set:
+#            self.G.add_node(node)
+#        for node in self.final_state_set:
+#            self.G.add_node(node)
+
+        # Not very useful when the graph is discovered incrementally from the
+        # intial states!
+
         self.final_augmented_state_set = set()
 
         # self.sanity_check()
 
         self.plant_abs = plant_abs
+        self.controller_abs = controller_abs
 
+        self.get_reachable_states = self.get_reachable_states_conc
         return
 
     def parse_config(self, config_dict):
@@ -186,6 +270,7 @@ class TopLevelAbs:
             self,
             abs_state_src,
             rchd_abs_state,
+            ci,
             pi
             ):
 
@@ -198,10 +283,10 @@ class TopLevelAbs:
         #   - get it from simulation trace:
         #       n = int(np.floor(t/self.delta_t))
 
-        self.G.add_edge(abs_state_src, rchd_abs_state, pi=pi)
+        self.G.add_edge(abs_state_src, rchd_abs_state, {'ci':ci,'pi':pi})
         return
 
-    def get_reachable_states(self, abs_state, system_params):
+    def get_reachable_states_conc(self, abs_state, system_params):
         abs2rchd_abs_state_set = set()
         #print(abs_state.ps.cell_id)
         # TODO: RECTIFY the below GIANT MESS
@@ -210,18 +295,27 @@ class TopLevelAbs:
 
         logger.debug('getting reachable states for: {}'.format(abs_state))
 
-        intermediate_state = \
-            self.controller_abs.get_reachable_abs_states(abs_state, self, system_params)
-        abs2rchd_abs_state_ci_pi_list = \
-            self.plant_abs.get_reachable_abs_states(intermediate_state, self, system_params)
+        abs2rchd_abs_state_ci_pi_list = self.plant_abs.get_reachable_abs_states(
+                abs_state, self, system_params)
 
-        for (rchd_abs_state, ci_cell, pi_cell) in abs2rchd_abs_state_ci_pi_list:
+        for (rchd_pabs_state, ci_cell, pi_cell) in abs2rchd_abs_state_ci_pi_list:
 
+            # print(ci)
+            rchd_abs_state = self.get_abs_state(rchd_pabs_state, None)
             self.add_relation(abs_state, rchd_abs_state, ci_cell, pi_cell)
             abs2rchd_abs_state_set.add(rchd_abs_state)
 
         logger.debug('found reachable abs_states: {}'.format(abs2rchd_abs_state_set))
         return abs2rchd_abs_state_set
+
+#     def states_along_paths(self, paths):
+#         MAX_ERROR_PATHS = 2
+#         bounded_paths = U.bounded_iter(paths, MAX_ERROR_PATHS)
+
+#         ret_list = []
+#         for path in bounded_paths:
+#             ret_list.append(path)
+#         return ret_list
 
 
     def compute_error_paths(self, initial_state_set, final_state_set, MAX_ERROR_PATHS):
@@ -248,6 +342,7 @@ class TopLevelAbs:
         '''
 
         MAX_ERROR_PATHS = max_paths
+        ci_dim = self.num_dims.ci
         pi_dim = self.num_dims.pi
         path_list = []
         ci_seq_list = []
@@ -265,6 +360,7 @@ class TopLevelAbs:
         def get_empty(_):
             return []
 
+        get_ci = get_ci_seq if ci_dim != 0 else get_empty
         get_pi = get_pi_seq if pi_dim != 0 else get_empty
 
         unique_paths = set()
@@ -410,7 +506,7 @@ class TopLevelAbs:
             pi_seq_list[idx] = pi_seq + [pi_cons] * missing_pi_len
 
 
-        if settings.debug:
+        if globalopts.debug:
             print('path states, min_len:{}, max_len:{}'.format(min_len, max_len))
 
         # ##!!##logger.debug('init_list:{}\n'.format(init_list))
@@ -453,8 +549,16 @@ class TopLevelAbs:
 
         return abs_state
 
+    def get_concrete_states_from_abs_state(self, abstract_state):
+        raise NotImplementedError
+
+#    def get_ival_cons_from_abs_state(self, abstract_state):
+#        return (PlantAbstraction.get_concrete_state_constraints(abstract_state.plant_state, ))
+
     def __repr__(self):
         return ''
+
+        # return self.G.__repr__()
 
     def draw_2d(self):
         pos_dict = {}
@@ -479,6 +583,7 @@ def sample_abs_state(abs_state,
     total_num_samples = samples.n
 
     x_array = samples.x_array
+    s_array = samples.s_array
 
     # print s_array
 
@@ -496,6 +601,7 @@ def sample_abs_state(abs_state,
     assert(len(d_array) == total_num_samples)
     assert(len(pvt_array) == total_num_samples)
     assert(len(x_array) == total_num_samples)
+    assert(len(s_array) == total_num_samples)
     assert(len(t_array) == total_num_samples)
 
 
@@ -522,8 +628,9 @@ def sample_abs_state(abs_state,
 
 class AbstractState(object):
 
-    def __init__(self, plant_state):
+    def __init__(self, plant_state, controller_state):
         self.plant_state = plant_state
+        self.controller_state = controller_state
         return
 
     # rename/shorten name hack
@@ -532,16 +639,27 @@ class AbstractState(object):
     def ps(self):
         return self.plant_state
 
+    @property
+    def cs(self):
+        return self.controller_state
+
     def __eq__(self, x):
 
+        # print('abstraction_eq_invoked')
+        # return hash((self.plant_state, self.controller_state)) == hash(as)
         if isinstance(x, AbstractState):
+            #return (self.ps, self.cs) == (x.ps, x.cs)
             return self.ps == x.ps
         else:
             return False
 
     def __hash__(self):
 
+        # print('abstraction_hash_invoked')
+
+        #return hash((self.ps, self.cs))
         return hash(self.ps)
 
     def __repr__(self):
-        return 'p={' + self.plant_state.__repr__() + '}'
+        return 'p={' + self.plant_state.__repr__() + '},c={' \
+            + self.controller_state.__repr__() + '}'

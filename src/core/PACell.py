@@ -14,9 +14,9 @@ from utils import print
 # import matplotlib.pyplot as plt
 #TAG:Z3_IND
 
-from . import concretePlant as cp
 from . import cellmanager as CM
 from .properties import PropertyChecker
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class PlantAbstraction:
             pvt,
             ):
 
+        assert(isinstance(cell_id, tuple))
         #return PlantAbstractState(cell_id, pi_cells_id, n, d, pvt)
         return PlantAbstractState(cell_id, n, d, pvt)
 
@@ -120,7 +121,10 @@ class PlantAbstraction:
         # Best advise to sort it out is to use objects for abstract states instead
         # of rudimentary tuples!
         cell_list = CM.get_cells_from_ival_constraints(x_cons, self.eps)
-        abs_state_list = [PlantAbstraction.get_abs_state(cell, n, d, pvt) for cell in cell_list]
+        abs_state_list = [
+                PlantAbstraction.get_abs_state(cell, n, d, pvt)
+                for cell in cell_list
+                ]
 
         return abs_state_list
 
@@ -261,23 +265,10 @@ class PlantAbstraction:
 
     def get_reachable_abs_states(
             self,
-            intermediate_state,
+            abs_state,
             A,
             system_params,
             ):
-
-        state = intermediate_state
-        total_num_samples = state.n
-
-        #property_checker = lambda t, Y: Y in system_params.final_cons
-        #property_checker = PropertyChecker(system_params.final_cons)
-        rchd_concrete_state_array = cp.compute_concrete_plant_output(
-                A,
-                system_params.plant_sim,
-                state,
-                total_num_samples)
-        #print(rchd_concrete_state_array)
-        #exit()
 
         # ================= DIRECT MANIPULATION ===================
         # of StateArray object
@@ -287,36 +278,33 @@ class PlantAbstraction:
         pi_ref = system_params.pi_ref
         ci_ref = system_params.ci_ref
 
-        abs2rchd_abs_state_ci_pi_list = []
-        for rchd_concrete_state in rchd_concrete_state_array.iterable():
+        pabs_state = abs_state.ps
 
-            rchd_abs_state = \
-                A.get_abs_state_from_concrete_state(rchd_concrete_state)
-            ci = rchd_concrete_state.ci
-            pi = rchd_concrete_state.pi
+        err.warn('n=0')
+        abs2rchd_abs_state_ci_pi_list = []
+        for rchd_abs_state in self.rch_abs_states(pabs_state):
+
+#             rchd_abs_state = self.get_abs_state_set_from_ival_constraints(
+#                     CM.ival_constraints(rchd_cell, self.eps), n=0, d=0, pvt=0)
+            ci = np.empty((0, A.num_dims.ci))
+            pi = np.empty((0, A.num_dims.pi))
             pi_cell = self.cell_id_from_concrete(pi, pi_ref.eps)
             ci_cell = self.cell_id_from_concrete(ci, ci_ref.eps)
-
-#             print('{} -> {} -> {}'.format(
-#                 rchd_concrete_state.x,
-#                 rchd_abs_state.plant_state.cell_id,
-#                 CM.ival_constraints(rchd_abs_state.plant_state.cell_id, self.eps))
-#                     )
-
-            if rchd_concrete_state.x in system_params.final_cons:
-                assert system_params.is_final(A, rchd_abs_state)
-#                     print(rchd_concrete_state)
-#                     print(self.get_ival_cons_abs_state(rchd_abs_state.ps))
-#                     print(rchd_concrete_state.x)
-#                     print(system_params.final_cons)
-#                     raise err.Fatal('cant happen!')
 
             if rchd_abs_state is not None:
                 abs2rchd_abs_state_ci_pi_list.append((rchd_abs_state, ci_cell, pi_cell))
 
-                logger.debug('abs_state obtained {} from concrete_state {}'.format(rchd_abs_state, rchd_concrete_state))
-
         return abs2rchd_abs_state_ci_pi_list
+
+    def rch_abs_states(self, pabs_state):
+        #return self.cell_graph.neighbors(self.get_abs_state_cell(pabs_state))
+        import settings
+        rchd_cells = settings.abs_graph[0].neighbors(self.get_abs_state_cell(pabs_state))
+        return (
+                self.get_abs_state(
+                    rchd_cell, pabs_state.n+1,
+                    pabs_state.d,
+                    pabs_state.pvt) for rchd_cell in rchd_cells)
 
     # Process the state only if the shortest simulation trace
     # TODO: <= or < ?
@@ -325,7 +313,7 @@ class PlantAbstraction:
 
         # print(abs_state.n)
 
-        return abs_state.n >= self.N
+        return abs_state.n >= self.N + 10
 
     def draw(self, fig):
         raise err.Fatal('unimplemented')

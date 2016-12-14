@@ -10,18 +10,15 @@ import collections
 
 import numpy as np
 
-from . import simulatesystem as simsys
 from pwa import pwa
 from pwa import simulator as pwa_sim
 from pwa import relational as rel
-from . import random_testing as rt
 from bmc import bmc as BMC
 from bmc.bmc_spec import InvarStatus
 import modeling.affinemodel as AFM
 from .cellmodels import Qxw, Qx
 from . import cellmanager as CM
 from graphs.graph import factory as graph_factory
-from graphs.graph import class_factory as graph_class
 from pwa import analyzepath as azp
 from . import state
 
@@ -128,7 +125,7 @@ def sim_n_plot(sp, AA, prop, error_paths, depth, pwa_model):
 #     return G
 
 
-class QGraph(graph_class(gopts.graph_lib)):
+class QGraph(gopts.graph_class):
     def __init__(self):
         super(self.__class__, self).__init__()
         self.init = set()
@@ -264,7 +261,7 @@ def get_pwa_system(sys, prop, sp, qgraph):
 #         qg.draw_graphviz()
 #         qg.draw_mplib()
 
-    draw_model(gopts.construct_path(sys.sys_name), pwa_sys_prop.pwa_model)
+    #draw_model(gopts.construct_path(sys.sys_name), pwa_sys_prop.pwa_model)
 
     #max_path_len = max([len(path) for path in error_paths])
     #print('max_path_len:', max_path_len)
@@ -582,12 +579,12 @@ def build_pwa_model(sys, prop, qgraph, sp, model_type):
 
     # number of training samples
     #TODO : should be min and not max!
-    ntrain = min(gopts.regression_sim_samples * MORE_FACTOR, MAX_TRAIN)
+    #ntrain = min(gopts.regression_sim_samples * MORE_FACTOR, MAX_TRAIN)
     # number of test samples
     #ntest = min(ntrain * TEST_FACTOR, MAX_TEST)
 
     dt = sys.delta_t
-    step_sim = simsys.get_step_simulator(sp.controller_sim, sp.plant_sim, dt)
+    #step_sim = simsys.get_step_simulator(sp.controller_sim, sp.plant_sim, dt)
 
     #abs_state_models = {}
 
@@ -599,7 +596,7 @@ def build_pwa_model(sys, prop, qgraph, sp, model_type):
     for q in qgraph:
         if settings.debug:
             print('modeling: {}'.format(q))
-        for sub_model in q_affine_models(prop, ntrain, step_sim, tol, include_err, qgraph, q):
+        for sub_model in q_affine_models(prop,  tol, include_err, qgraph, q):
             assert(sub_model is not None)
             # sub_model.pnexts[0] = sub_model.p.ID to enforce self loops
             print(U.colorize('{} -> {}, e%:{}, status: {}, e: {}, A:{}, b:{}'.format(
@@ -727,7 +724,7 @@ def model(tol, X, Y):
     return [(rm, e_pc, status)]
 
 
-def mdl_1relational(prop, tol, step_sim, qgraph, q, X, Y):
+def mdl_1relational(prop, tol, qgraph, q, X, Y):
     assert(X.shape[1] == q.dim)
     assert(Y.shape[1] == q.dim)
     assert(X.shape[0] == Y.shape[0])
@@ -1037,7 +1034,7 @@ def q_affine_models_old(AA, prop, ntrain, step_sim, tol, include_err, qgraph, q)
 
 
 # models can be split
-def q_affine_models(prop, ntrain, step_sim, tol, include_err, qgraph, q):
+def q_affine_models(prop, tol, include_err, qgraph, q):
     """Find affine models for a given Q
 
     Parameters
@@ -1055,13 +1052,9 @@ def q_affine_models(prop, ntrain, step_sim, tol, include_err, qgraph, q):
     ------
     """
 
-    try_again = True
-    ntries = 1
-    #MAX_TRIES = 2
-    MAX_TRIES = 0
-    while try_again:
-        last_node = not qgraph.edges(q)
-        X, Y = q.get_rels(prop, step_sim, ntrain)
+    last_node = not qgraph.edges(q)
+    if not last_node:
+        X, Y = q.get_rels(prop, settings.data)
         assert(not X.size == 0 or Y.size == 0)
         assert(not Y.size == 0 or X.size == 0)
         if X.size == 0:
@@ -1074,27 +1067,17 @@ def q_affine_models(prop, ntrain, step_sim, tol, include_err, qgraph, q):
             return [dummy_sub_model(q)]
 
         try:
-            regression_models = mdl_1relational(prop, tol, step_sim, qgraph, q, X, Y)
-            # we are done!
-            if regression_models:
-                try_again = False
-            # else try again
-            else:
+            regression_models = mdl_1relational(prop, tol, qgraph, q, X, Y)
+            if not regression_models:
                 err.warn('no model found')
-                if ntries > MAX_TRIES:
-                    if last_node:
-                        err.warn('giving up on last node')
-                    else:
-                        err.warn('can happen rarely...')
-                    try_again = False
+                if last_node:
+                    err.warn('giving up on last node')
+                else:
+                    err.warn('can happen rarely...')
         except AFM.UdetError:
             pass
-        if try_again:
-            print('trying again')
-        # double the number of samples and try again
-        ntrain *= 2
-        # repeat!
-        ntries += 1
+    else:
+        regression_models = []
 
     # try again on failure, and settle with non relational models
     #assert(regression_models)

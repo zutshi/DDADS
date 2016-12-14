@@ -30,10 +30,10 @@ def setup_logger(time_str):
 
 
 #side effect: creates the dir
-def setup_dir(sys, dirname, time_str):
+def setup_dir(sys_name, dirname, time_str):
     # If no output folder is specified, generate one
     if dirname is None:
-        dirname = '{}_{}'.format(sys.sys_name, time_str)
+        dirname = '{}_{}'.format(sys_name, time_str)
     if fops.file_exists(dirname):
         err.Fatal('output dir exists! Please provide a new dir name to prevent override.')
 
