@@ -3,7 +3,7 @@
 % id = 'stats:regress:RankDefDesignMat'
 % warning('off',id)
 
-data_path = '/home/zutshi/work/projects/DDADS/branches/proto/data/vdp/';
+data_path = '../data/vdp/';
 
 %% Train
 data_train = load([data_path 'vdp_data_1e4_t02.mat'], 'Y_summary')
