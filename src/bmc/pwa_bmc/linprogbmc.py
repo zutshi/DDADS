@@ -93,6 +93,7 @@ class BMC(BMCSpec):
         print(term.move_up + term.move_up)
         print('checking models: ', end='')
 
+        ctr = 0
         for ctr, path in enumerate(path_gen):
 
             with term.location():
@@ -140,7 +141,7 @@ class BMC(BMCSpec):
         return qgraph
 
 
-class QGraph(graph_class(gopts.graph_lib)):
+class QGraph(gopts.graph_class):
     def __init__(self):
         super(self.__class__, self).__init__()
         self.init = set()

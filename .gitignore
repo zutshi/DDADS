@@ -37,3 +37,4 @@ set_src.sh
 *.prof
 vault
 TODO
+*.simdump*
